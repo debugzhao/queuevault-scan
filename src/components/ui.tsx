@@ -61,11 +61,14 @@ export function Pill(props: {
   title?: string;
   style?: CSSProperties;
   className?: string;
+  /** 视觉上已收起：对读屏隐藏，并移出 Tab 顺序 */
+  concealed?: boolean;
 }) {
+  const a11y = props.concealed ? { "aria-hidden": true, tabIndex: -1 } : {};
   const cls = `pill ${props.small ? "sm" : ""} ${props.active ? "active" : ""} ${props.btn ? "btn" : ""} ${props.className ?? ""}`;
   if (props.href)
     return (
-      <a className={cls} href={props.href} title={props.title} style={props.style}>
+      <a className={cls} href={props.href} title={props.title} style={props.style} {...a11y}>
         {props.children}
       </a>
     );
@@ -76,7 +79,7 @@ export function Pill(props: {
       </button>
     );
   return (
-    <span className={cls} title={props.title} style={props.style}>
+    <span className={cls} title={props.title} style={props.style} aria-hidden={props.concealed || undefined}>
       {props.children}
     </span>
   );

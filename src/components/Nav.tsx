@@ -1,5 +1,7 @@
 // 悬浮玻璃导航：Logo、搜索（交易哈希 / #请求ID）、状态胶囊、网络胶囊、Contracts 锚点、语言切换。
-// 页面顶部时导航融在 Hero 里（透明、全宽）；向下滚动超过阈值后收成玻璃胶囊吸附在顶部，带弹性缓动。
+// 页面顶部时导航融在 Hero 里（透明、全宽）；向下滚动超过阈值后吸附在顶部（参考 ethena.fi）：
+// 宽度与下方内容区对齐，留下的元素各自变成独立的玻璃按钮；
+// 次要元素（品牌文字、网络胶囊、合约链接）收起，只保留 Logo、搜索、状态、语言切换，回到顶部再展开。
 import { useEffect, useState } from "react";
 import { IS_DEVNET } from "../config";
 import { LANGS, useI18n } from "../i18n";
@@ -58,9 +60,13 @@ export function Nav({ scan, onSearch }: { scan: ScanState; onSearch: (q: string)
   return (
     <div className={`nav-wrap ${docked ? "docked" : ""}`}>
       <nav className="nav">
-        <a className="brand" href="#top">
-          <Logo />
-          <span>QueueVault Scan</span>
+        <a className="brand" href="#top" aria-label="QueueVault Scan">
+          <span className="brand-mark">
+            <Logo />
+          </span>
+          <span className="brand-text collapsible" aria-hidden={docked || undefined}>
+            QueueVault Scan
+          </span>
         </a>
         <div className="search">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -85,8 +91,10 @@ export function Nav({ scan, onSearch }: { scan: ScanState; onSearch: (q: string)
             {label}
           </Pill>
           {IS_DEVNET && docked && <span className="badge warn sim-mini">{t("sim.short")}</span>}
-          <Pill className="net">{IS_DEVNET ? t("nav.devnet") : t("nav.testnet")}</Pill>
-          <Pill href="#contracts" className="nav-link">
+          <Pill className="net collapsible" concealed={docked}>
+            {IS_DEVNET ? t("nav.devnet") : t("nav.testnet")}
+          </Pill>
+          <Pill href="#contracts" className="nav-link collapsible" concealed={docked}>
             {t("nav.contracts")}
           </Pill>
           <div className="lang-switch" role="group" aria-label={t("nav.lang")}>
