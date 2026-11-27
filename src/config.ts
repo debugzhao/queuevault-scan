@@ -30,8 +30,15 @@ export const LASNA_RPC: string = env.VITE_LASNA_RPC_URL ?? (IS_DEVNET ? DEVNET_R
 
 /** 部署文件里没有起始区块时，往回扫多少个区块 */
 export const LOOKBACK = BigInt(env.VITE_LOOKBACK_BLOCKS ?? 20_000);
-/** 单次 getLogs 的区块跨度：公共 RPC 一般有上限，扫不动就调小 */
-export const LOG_CHUNK = BigInt(env.VITE_LOG_CHUNK ?? 5_000);
+/**
+ * 单次 getLogs 的区块跨度，按链分别设置。
+ * sepolia.base.org 限制 200 个区块（HTTP 413 "eth_getLogs is limited to a 200 range"），200ms 出块下只有约 40 秒；
+ * Lasna 公共 RPC 实测 3,000 个区块可以一次查完。
+ */
+export const LOG_CHUNK: Record<ChainKey, bigint> = {
+  base: BigInt(env.VITE_BASE_LOG_CHUNK ?? env.VITE_LOG_CHUNK ?? (IS_DEVNET ? 5_000 : 200)),
+  lasna: BigInt(env.VITE_LASNA_LOG_CHUNK ?? env.VITE_LOG_CHUNK ?? 5_000),
+};
 export const POLL_MS = Number(env.VITE_POLL_MS ?? 2_000);
 
 /** Base Sepolia 上 Multicall3 的标准地址；本地 anvil 没有，所以 devnet 不用 multicall */

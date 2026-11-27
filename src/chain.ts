@@ -275,7 +275,7 @@ export class Scanner {
   }
 
   /** 每次最多扫 maxChunks 段，避免首屏一次性打太多请求 */
-  async step(maxChunks = 4): Promise<Ev[]> {
+  async step(maxChunks = 8): Promise<Ev[]> {
     const c = clients[this.chain];
     this.head = await c.getBlockNumber();
     if (this.cursor === undefined) {
@@ -286,7 +286,8 @@ export class Scanner {
     const out: Ev[] = [];
     let cursor: bigint = this.cursor;
     for (let i = 0; i < maxChunks && cursor <= this.head; i++) {
-      const to: bigint = cursor + LOG_CHUNK - 1n < this.head ? cursor + LOG_CHUNK - 1n : this.head;
+      const span = LOG_CHUNK[this.chain];
+      const to: bigint = cursor + span - 1n < this.head ? cursor + span - 1n : this.head;
       let logs: Awaited<ReturnType<typeof c.getLogs>>;
       try {
         logs = await c.getLogs({ address: this.addresses, fromBlock: cursor, toBlock: to });
