@@ -89,6 +89,8 @@ function contractName(e: Ev) {
   const d = DEPLOYMENTS;
   const a = e.address.toLowerCase();
   if (!d) return "";
+  // Lasna 上只有 QueueReactive；它可能和 Base 上的金库地址相同（部署钱包在两条链上 nonce 一致），必须先按链区分
+  if (e.chain === "lasna") return a === d.reactive.toLowerCase() ? "QueueReactive" : short(e.address);
   if (a === d.vault.toLowerCase()) return "QueueVault";
   if (a === d.pool.toLowerCase()) return "MockPool";
   if (a === d.settler.toLowerCase()) return "QueueSettler";
