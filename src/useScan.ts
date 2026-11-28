@@ -12,6 +12,7 @@ import {
   readSnapshot,
 } from "./chain";
 import { type ChainKey, DEPLOYMENTS, POLL_MS } from "./config";
+import { history } from "./history";
 
 export const HEATMAP_CELLS = 120;
 const MAX_EVENTS = 2_000;
@@ -40,6 +41,8 @@ export function useScan(): ScanState {
     if (!DEPLOYMENTS) return;
     let alive = true;
     const scanners = makeScanners();
+    // 先放入预打包的历史事件（实验期的完整链路），实时扫描到同一条日志时按 key 去重
+    for (const e of history.events) events.current.set(e.key, e);
 
     const tick = async () => {
       const errors: Partial<Record<ChainKey, string>> = {};

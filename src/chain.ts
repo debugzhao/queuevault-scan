@@ -14,6 +14,7 @@ import {
   hasReactive,
   hasSettler,
 } from "./config";
+import { history } from "./history";
 
 const baseChain = defineChain({
   id: 84532,
@@ -417,8 +418,14 @@ export function makeScanners(): Scanner[] {
   const base = [d.vault, d.pool, ...(hasSettler() ? [d.settler] : [])];
   // 每轮回填段数：Base 每段只有 200 块（约 40 秒），要多扫几段；Lasna 每段 5,000 块（约 83 分钟），少扫几段就够。
   // 段与段之间串行发送，实测约 2 次请求/秒，不会触发公共 RPC 的 429
-  const s = [new Scanner("base", base, baseEventsAbi as Abi, d.baseBlock, 8)];
-  if (hasReactive()) s.push(new Scanner("lasna", [d.reactive], lasnaEventsAbi as Abi, d.lasnaBlock, 3));
+  // 有预打包历史（history.json）时，回填只补导出之后的区块
+  const from = (chain: ChainKey, deployed?: number) => {
+    const covered = history.coveredTo[chain];
+    const start = BigInt(deployed ?? 0);
+    return Number(covered !== undefined && covered + 1n > start ? covered + 1n : start);
+  };
+  const s = [new Scanner("base", base, baseEventsAbi as Abi, from("base", d.baseBlock), 8)];
+  if (hasReactive()) s.push(new Scanner("lasna", [d.reactive], lasnaEventsAbi as Abi, from("lasna", d.lasnaBlock), 3));
   return s;
 }
 
