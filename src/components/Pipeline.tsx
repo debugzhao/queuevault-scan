@@ -61,12 +61,21 @@ export function Pipeline({ scan, selected, highlight }: { scan: ScanState; selec
   const now = useNow(100);
   const nowS = now / 1000;
   const repaids = scan.events.filter((e) => e.chain === "base" && e.name === "Repaid");
-  // 搜索命中的链路优先；否则取最近一次还款
+  const latest = repaids[0] ? scan.traces.find((tr) => tr.origin === repaids[0].tx) : undefined;
+  const latestAge = latest?.t0 !== undefined ? nowS - latest.t0 : undefined;
+  // 最近一条由 Reactive 完成的链路：优先还款触发的，其次快照触发的
+  const lastSettled =
+    scan.traces.find((tr) => tr.status === "SETTLED" && tr.source === "REPAY") ?? scan.traces.find((tr) => tr.status === "SETTLED");
+  // 选择顺序：搜索命中 > 正在进行中的最新还款（现场演示时实时计时）> 最近一条 Reactive 完成的链路 > 最新还款。
+  // 不能无条件展示最新还款：轮询对照组期间 Reactive 处于暂停状态，最新还款会显示「未触发」，误导成 Reactive 没在工作
+  const latestActive =
+    !!latest && (latest.status === "SETTLED" || latest.status === "IN FLIGHT" || (latestAge !== undefined && latestAge <= NO_ACTION_AFTER_S));
   const trace: Trace | undefined = selected
     ? scan.traces.find((tr) => tr.origin === selected)
-    : repaids[0]
-      ? scan.traces.find((tr) => tr.origin === repaids[0].tx)
-      : undefined;
+    : latestActive
+      ? latest
+      : (lastSettled ?? latest);
+  const pinned = !selected && !!latest && !!trace && trace !== latest;
   const repaid: Ev | undefined = trace ? repaids.find((e) => e.tx === trace.origin) : undefined;
   const originEv = repaid ?? (trace ? scan.events.find((e) => e.chain === "base" && e.tx === trace.origin) : undefined);
 
@@ -90,6 +99,16 @@ export function Pipeline({ scan, selected, highlight }: { scan: ScanState; selec
     : [];
 
   const vault = DEPLOYMENTS?.vault.toLowerCase();
+  // 同一笔交易里有 ReactiveSettled = 金库是被 Reactive 回调取回的；否则是别人调用了 settleQueue（例如轮询机器人）
+  const callbackTxs = new Set(scan.events.filter((e) => e.name === "ReactiveSettled").map((e) => e.tx));
+  // 某个时刻 Reactive 是否处于退订（暂停）状态：看在那之前最后一条 SubscriptionChanged
+  const pausedAt = (ts?: number) => {
+    if (ts === undefined) return false;
+    const sc = scan.events.find((e) => e.name === "SubscriptionChanged" && e.ts !== undefined && e.ts <= ts);
+    return !!sc && sc.args.subscribed === false;
+  };
+  const wasPaused = !!trace && !trace.react && pausedAt(trace.t0);
+  const latestPaused = !!latest && pausedAt(latest.t0);
   const originKind = trace ? (trace.source === "REPAY" ? "Repaid" : (trace.originEvent ?? t("pipe.snapshot"))) : "";
 
   return (
@@ -98,10 +117,24 @@ export function Pipeline({ scan, selected, highlight }: { scan: ScanState; selec
       highlight={highlight}
       error={scan.errors.base ?? scan.errors.lasna}
       title={t("pipe.title")}
-      sub={trace ? t("pipe.sub", { kind: originKind, time: clock(t0) }) : t("pipe.subEmpty")}
+      sub={
+        trace ? (
+          <>
+            {t("pipe.sub", { kind: originKind, time: clock(t0) })}
+            {pinned && (
+              <div style={{ marginTop: 4 }}>
+                {t(latestPaused ? "pipe.pinnedPaused" : "pipe.pinned", { time: clock(latest?.t0) })}
+              </div>
+            )}
+          </>
+        ) : (
+          t("pipe.subEmpty")
+        )
+      }
       right={
         <>
           {selected && <Pill small>{t("pipe.searchResult")}</Pill>}
+          {pinned && <Pill small>{t("pipe.pinnedPill")}</Pill>}
           {trace && <StatusBadge trace={trace} noAction={noAction} t={t} />}
         </>
       }
@@ -138,7 +171,14 @@ export function Pipeline({ scan, selected, highlight }: { scan: ScanState; selec
               name="QueueReactive · react()"
               state={react ? "done" : reactLive ? "live" : "idle"}
               tx={react?.tx ?? trace.skipped?.tx}
-              time={react && t0 !== undefined && trace.t1 !== undefined ? trace.t1 - t0 : reactLive ? elapsed : undefined}
+              // 跨链时间戳各自取整到整秒且有时钟偏差，T1 − T0 可能为负（实测中位数 −1s）；与延迟图一致，截断到 [0, 端到端]
+              time={
+                react && t0 !== undefined && trace.t1 !== undefined
+                  ? Math.min(trace.e2eS ?? Infinity, Math.max(0, trace.t1 - t0))
+                  : reactLive
+                    ? elapsed
+                    : undefined
+              }
               live={reactLive}
               liveLabel={t("pipe.live")}
               badge={
@@ -147,7 +187,7 @@ export function Pipeline({ scan, selected, highlight }: { scan: ScanState; selec
                     {t("pipe.skippedBadge", { r: String(trace.skipped.args.reason) })}
                   </Badge>
                 ) : noAction ? (
-                  <Badge tone="warn" title={t("pipe.noActionTitle")}>
+                  <Badge tone="warn" title={wasPaused ? t("pipe.pausedWhy") : t("pipe.noActionTitle")}>
                     {t("pipe.noAction")}
                   </Badge>
                 ) : undefined
@@ -162,7 +202,7 @@ export function Pipeline({ scan, selected, highlight }: { scan: ScanState; selec
                   : trace.skipped
                     ? [[t("pipe.reason"), skipReason(t, Number(trace.skipped.args.reason))]]
                     : noAction
-                      ? [[t("pipe.why"), t("pipe.noActionWhy")]]
+                      ? [[t("pipe.why"), wasPaused ? t("pipe.pausedWhy") : t("pipe.noActionWhy")]]
                       : [[t("pipe.status"), t("pipe.waitingReact")]]
               }
             />
@@ -204,12 +244,23 @@ export function Pipeline({ scan, selected, highlight }: { scan: ScanState; selec
             ) : (
               taken.map((e) => {
                 const mine = String(e.args.lender).toLowerCase() === vault;
+                const viaReactive = mine && callbackTxs.has(e.tx);
                 return (
                   <div className="taken-row" key={e.key}>
                     <span className="num gradient-text" style={{ fontSize: 15 }}>
                       {t0 !== undefined && e.ts !== undefined ? secs(e.ts - t0) : "—"}
                     </span>
-                    <span>{mine ? <Badge tone="mint">{t("pipe.takenMine")}</Badge> : <Badge tone="bad">{t("pipe.takenOther")}</Badge>}</span>
+                    <span>
+                      {viaReactive ? (
+                        <Badge tone="mint">{t("pipe.takenMine")}</Badge>
+                      ) : mine ? (
+                        <Badge tone="base" title={t("pipe.takenMineOtherTitle")}>
+                          {t("pipe.takenMineOther")}
+                        </Badge>
+                      ) : (
+                        <Badge tone="bad">{t("pipe.takenOther")}</Badge>
+                      )}
+                    </span>
                     <TxLink chain="base" hash={e.tx} />
                     <span className="num" style={{ textAlign: "right", color: mine ? "var(--mint)" : "var(--bad)" }}>
                       {usdc(e.args.amount as bigint)} USDC
