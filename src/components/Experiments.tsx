@@ -52,6 +52,9 @@ function EmptyState() {
   );
 }
 
+/** Base Sepolia 出块间隔：实测 815 个区块跨 163 秒 */
+const BASE_BLOCK_S = 0.2;
+
 function DatasetView({ ds }: { ds: Dataset }) {
   const { t } = useI18n();
   const ok = ds.latency.filter((r) => r.status === "ok");
@@ -59,7 +62,9 @@ function DatasetView({ ds }: { ds: Dataset }) {
   const delays = [...new Set(ds.race.map((r) => Number(r.delay_s)))].sort((a, b) => a - b);
   const cell = (m: string, d: number) => ds.race.filter((r) => r.mode === m && Number(r.delay_s) === d);
   const capture = (rows: Record<string, string>[]) => nums(rows, "capture").reduce((a, b) => a + b, 0) / Math.max(1, rows.length);
-  const L = nums(ok, "offchain_e2e_ms").map((x) => x / 1000);
+  // 主指标：同一条链上的区块号之差 × 200ms（Base Sepolia 出块间隔），比整秒时间戳精细 5 倍，也不受跨链时钟偏差影响
+  const blocks = ok.map((r) => Number(r.baseBlock2) - Number(r.baseBlock0)).filter(Number.isFinite);
+  const L = blocks.map((b) => b * BASE_BLOCK_S);
 
   return (
     <>
@@ -92,20 +97,21 @@ function DatasetView({ ds }: { ds: Dataset }) {
             <tbody>
               {(
                 [
-                  [t("x.mE2e"), "e2e_s"],
-                  [t("x.mB2l"), "baseToLasna_s"],
-                  [t("x.mL2b"), "lasnaToBase_s"],
-                  [t("x.mOff"), "offchain_e2e_ms"],
+                  [t("x.mBlocks"), blocks, (x: number) => (Number.isFinite(x) ? String(x) : "—")],
+                  [t("x.mBlockS"), L, f1],
+                  [t("x.mE2e"), nums(ok, "e2e_s"), f1],
+                  [t("x.mB2l"), nums(ok, "baseToLasna_s"), f1],
+                  [t("x.mL2b"), nums(ok, "lasnaToBase_s"), f1],
+                  [t("x.mOff"), nums(ok, "offchain_e2e_ms"), f1],
                 ] as const
-              ).map(([name, key]) => {
-                const xs = nums(ok, key);
+              ).map(([name, xs, fmt]) => {
                 return (
-                  <tr key={key}>
+                  <tr key={name}>
                     <td>{name}</td>
-                    <td className="r num">{f1(median(xs))}</td>
-                    <td className="r num">{f1(percentile(xs, 95))}</td>
-                    <td className="r num">{xs.length ? f1(Math.min(...xs)) : "—"}</td>
-                    <td className="r num">{xs.length ? f1(Math.max(...xs)) : "—"}</td>
+                    <td className="r num">{fmt(median(xs))}</td>
+                    <td className="r num">{fmt(percentile(xs, 95))}</td>
+                    <td className="r num">{xs.length ? fmt(Math.min(...xs)) : "—"}</td>
+                    <td className="r num">{xs.length ? fmt(Math.max(...xs)) : "—"}</td>
                   </tr>
                 );
               })}

@@ -16,6 +16,8 @@ export const datasets: Dataset[] = (() => {
   const groups = new Map<string, Dataset>();
   for (const [path, text] of Object.entries(raw)) {
     const rel = path.split("/bench/results/")[1];
+    // _discarded/ 放的是方法学修正前作废的数据，和报告口径一致，不展示
+    if (rel.startsWith("_discarded/")) continue;
     const devnet = rel.startsWith("devnet/");
     const label = devnet ? "devnet" : "testnet";
     const g = groups.get(label) ?? { label, devnet, latency: [], race: [] };
