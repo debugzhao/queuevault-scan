@@ -76,7 +76,17 @@ export function Hero({ scan }: { scan: ScanState }) {
         {scan.syncing < 1 && (
           <div className="sync">
             <Pill small>
-              {t("sync", { pct: Math.floor(scan.syncing * 100) })}
+              {/* 回填从新往旧，历史可能有几天：显示「已加载最近多久」比百分比直观（百分比会长时间停在 0%） */}
+              {scan.coveredSeconds > 0
+                ? t("syncAge", {
+                    age:
+                      scan.coveredSeconds < 3600
+                        ? t("u.min", { n: Math.max(1, Math.floor(scan.coveredSeconds / 60)) })
+                        : scan.coveredSeconds < 86400
+                          ? t("u.hour", { n: (scan.coveredSeconds / 3600).toFixed(1) })
+                          : t("u.day", { n: (scan.coveredSeconds / 86400).toFixed(1) }),
+                  })
+                : t("sync", { pct: Math.floor(scan.syncing * 100) })}
               <span className="bar">
                 <i style={{ width: `${scan.syncing * 100}%` }} />
               </span>

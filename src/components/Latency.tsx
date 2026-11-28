@@ -6,16 +6,20 @@ import { useI18n } from "../i18n";
 import type { ScanState } from "../useScan";
 import { GlassCard, Tooltip, TxLink, useTooltip } from "./ui";
 
-type Done = Trace & { t0: number; t1: number; t2: number };
+type Done = Trace & { t0: number; t1: number; t2: number; e2eS: number };
 const BAR_H = 200;
 
 export function Latency({ scan }: { scan: ScanState }) {
   const { t } = useI18n();
   const done = scan.traces
-    .filter((t): t is Done => t.status === "SETTLED" && t.t0 !== undefined && t.t1 !== undefined && t.t2 !== undefined)
+    .filter(
+      (t): t is Done =>
+        t.status === "SETTLED" && t.t0 !== undefined && t.t1 !== undefined && t.t2 !== undefined && t.e2eS !== undefined,
+    )
     .slice(0, 60)
     .reverse(); // 旧 → 新，从左往右
-  const e2e = done.map((t) => t.t2 - t.t0);
+  // ⭐ 主指标：Base 区块差 × 0.2s（与 bench 报告同口径）；整秒时间戳相减只有 ±1s 精度
+  const e2e = done.map((t) => t.e2eS);
   const med = median(e2e);
   const p95 = percentile(e2e, 95);
   const max = Math.max(1, ...e2e);
@@ -36,8 +40,15 @@ export function Latency({ scan }: { scan: ScanState }) {
 
       {done.length === 0 ? (
         <div className="empty" style={{ marginTop: 22 }}>
-          {t("lat.empty")}
-          <code className="code">cd bench && npm run bench -- --rounds 30 --amount 100</code>
+          {scan.syncing < 1 ? (
+            // 历史从新往旧回填：较早的兑付还没扫到，不能说「还没有完成的兑付」
+            t("lat.backfilling")
+          ) : (
+            <>
+              {t("lat.empty")}
+              <code className="code">cd bench && npm run bench -- --rounds 30 --amount 100</code>
+            </>
+          )}
         </div>
       ) : (
         <div className="chart" ref={tt.ref} onMouseLeave={tt.hide}>
@@ -48,8 +59,9 @@ export function Latency({ scan }: { scan: ScanState }) {
           ))}
           <div className="bars">
             {done.map((t) => {
-              const a = Math.max(0, t.t1 - t.t0);
-              const b = Math.max(0, t.t2 - t.t1);
+              // 柱高 = 区块差口径的 E2E；两段的拆分用跨链时间戳估计（有时钟偏差，截断到 [0, E2E]）
+              const a = Math.min(t.e2eS, Math.max(0, t.t1 - t.t0));
+              const b = t.e2eS - a;
               const h = (x: number) => Math.max(x > 0 ? 3 : 0, (x / top) * BAR_H);
               return (
                 <div key={t.origin} className="bar-col" onMouseMove={(e) => tt.show(e, t)}>
@@ -64,7 +76,7 @@ export function Latency({ scan }: { scan: ScanState }) {
             <Tooltip x={tt.tip.x} y={tt.tip.y} width={tt.ref.current?.clientWidth ?? 600}>
               <div className="row">
                 <span className="dim">T0 {clock(tt.tip.data.t0)}</span>
-                <b className="num">{t("lat.e2e", { s: secs(tt.tip.data.t2 - tt.tip.data.t0, false) })}</b>
+                <b className="num">{t("lat.e2e", { s: secs(tt.tip.data.e2eS, false) })}</b>
               </div>
               <div className="row">
                 <span style={{ color: "var(--lasna)" }}>Base → Lasna</span>

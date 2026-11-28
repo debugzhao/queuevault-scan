@@ -15,6 +15,8 @@ import { type ChainKey, DEPLOYMENTS, POLL_MS } from "./config";
 
 export const HEATMAP_CELLS = 120;
 const MAX_EVENTS = 2_000;
+/** buildTraces 关联三段链路所需的事件，不参与裁剪（数量与实验轮数同阶，几百到几千条） */
+const TRACE_EVENTS = new Set(["Repaid", "RedeemRequested", "SettleRequested", "Skipped", "ReactiveSettled"]);
 
 export type ScanState = {
   snap?: Snapshot;
@@ -22,6 +24,7 @@ export type ScanState = {
   events: Ev[]; // 新的在前
   traces: Trace[];
   syncing: number; // 历史日志同步进度 0..1
+  coveredSeconds: number; // 历史已回填覆盖的最近时长（秒，两条链取较短者）
   errors: Partial<Record<ChainKey, string>>;
   updatedAt?: number;
 };
@@ -29,7 +32,7 @@ export type ScanState = {
 const msg = (e: unknown) => (e as Error).message.split("\n")[0].slice(0, 160);
 
 export function useScan(): ScanState {
-  const [state, setState] = useState<ScanState>({ requests: [], events: [], traces: [], syncing: 0, errors: {} });
+  const [state, setState] = useState<ScanState>({ requests: [], events: [], traces: [], syncing: 0, coveredSeconds: 0, errors: {} });
   const events = useRef<Map<string, Ev>>(new Map());
   const last = useRef<{ snap?: Snapshot; requests: RedeemRequest[]; traces: Trace[] }>({ requests: [], traces: [] });
 
@@ -55,7 +58,14 @@ export function useScan(): ScanState {
       const all = [...events.current.values()].sort(
         (a, b) => (b.ts ?? 0) - (a.ts ?? 0) || Number(b.block - a.block) || b.logIndex - a.logIndex,
       );
-      if (all.length > MAX_EVENTS) for (const e of all.splice(MAX_EVENTS)) events.current.delete(e.key);
+      // 只裁剪非关键事件：拼链路要用的还款、排队、react、回调必须全部保留。
+      // 否则回填扫到大量较新的事件后，较早的回调和 react 会被挤掉，链路拼不起来，延迟图变空
+      let kept = 0;
+      for (let i = 0; i < all.length; i++) {
+        if (TRACE_EVENTS.has(all[i].name) || ++kept <= MAX_EVENTS) continue;
+        events.current.delete(all[i].key);
+        all.splice(i--, 1);
+      }
 
       const snap = last.current.snap;
       const [reqR, trR] = await Promise.allSettled([
@@ -68,6 +78,7 @@ export function useScan(): ScanState {
       else errors.base ??= msg(trR.reason);
 
       const syncing = Math.min(...scanners.map((s) => s.progress));
+      const coveredSeconds = Math.min(...scanners.map((s) => s.coveredSeconds));
       if (alive)
         setState({
           snap,
@@ -75,17 +86,22 @@ export function useScan(): ScanState {
           events: all,
           traces: last.current.traces,
           syncing,
+          coveredSeconds,
           errors,
           updatedAt: Date.now(),
         });
+      return Object.keys(errors).length > 0;
     };
 
     let timer: ReturnType<typeof setTimeout>;
+    let backoff = 0;
     const loop = async () => {
-      await tick();
-      // 历史还没扫完时立即接着扫，扫完后按 POLL_MS 轮询
+      const failed = await tick();
+      // 历史回填期间每轮间隔 300ms（每轮回填段数见 makeScanners），回填完按 POLL_MS 轮询；
+      // 出错（多半是公共 RPC 429）时指数退避，最长 15 秒
+      backoff = failed ? Math.min(15_000, Math.max(1_000, backoff * 2)) : 0;
       const behind = scanners.some((s) => s.progress < 1);
-      if (alive) timer = setTimeout(loop, behind ? 50 : POLL_MS);
+      if (alive) timer = setTimeout(loop, backoff || (behind ? 300 : POLL_MS));
     };
     loop();
     return () => {

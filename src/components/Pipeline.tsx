@@ -173,7 +173,7 @@ export function Pipeline({ scan, selected, highlight }: { scan: ScanState; selec
               name="QueueSettler · callback"
               state={cb ? "done" : cbLive ? "live" : "idle"}
               tx={cb?.tx}
-              time={cb && t0 !== undefined && trace.t2 !== undefined ? trace.t2 - t0 : cbLive ? elapsed : undefined}
+              time={cb && trace.e2eS !== undefined ? trace.e2eS : cbLive ? elapsed : undefined}
               live={cbLive}
               liveLabel={t("pipe.live")}
               rows={
